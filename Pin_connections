@@ -1,0 +1,43 @@
+  }
+}
+Pin Connections
+Arduino Nano (Transmitter)
+Component	Pin
+DHT11	D4
+Rain Sensor	A0
+Water Sensor	A1
+Float Switch	D3
+Ultrasonic TRIG	D5
+Ultrasonic ECHO	D6
+LoRa NSS	D10
+LoRa RST	D9
+LoRa DIO0	D2
+LoRa MOSI	D11
+LoRa MISO	D12
+LoRa SCK	D13
+OLED SDA	A4
+OLED SCL	A5
+ESP32 (Receiver)
+Component	Pin
+OLED SDA	GPIO 0
+OLED SCL	GPIO 33
+LoRa NSS	GPIO 5
+LoRa RST	GPIO 14
+LoRa DIO0	GPIO 26
+LoRa MOSI	GPIO 23
+LoRa MISO	GPIO 19
+LoRa SCK	GPIO 18
+Buzzer	GPIO 4
+Upload Instructions
+Upload transmitter code to Arduino Nano
+
+Upload receiver code to ESP32
+
+Both LoRa modules must use 433 MHz
+
+Install required libraries: LoRa, DHT Sensor Library, Adafruit Unified Sensor, Adafruit GFX, Adafruit SSD1306
+
+SX1278 requires 3.3V logic — protect from 5V Nano signals
+
+GPIO0 on ESP32 can cause boot issues — if needed, move OLED SDA to GPIO21 and update code
+
