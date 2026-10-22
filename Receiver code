@@ -1,0 +1,242 @@
+/*
+========================================================
+ PROJECT: LoRa-Based Heavy Rain and Flood Detection
+ AUTHOR: Harsh Mahesh Mhatre
+ CONTROLLER: ESP32
+ MODULE: SX1278 LoRa 433 MHz
+
+ COMPONENTS:
+ 1. ESP32 - Main receiver controller
+ 2. SX1278 - Wireless LoRa data reception
+ 3. SSD1306 OLED - Sensor information display
+ 4. Active Buzzer - Flood warning alarm
+
+ LIBRARIES:
+ - LoRa by Sandeep Mistry
+ - Adafruit GFX
+ - Adafruit SSD1306
+========================================================
+*/
+
+#include <SPI.h>
+#include <LoRa.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ---------------- OLED CONFIGURATION ----------------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_SDA 0
+#define OLED_SCL 33
+#define OLED_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// ---------------- LORA CONFIGURATION ----------------
+#define LORA_SS 5
+#define LORA_RST 14
+#define LORA_DIO0 26
+#define LORA_MOSI 23
+#define LORA_MISO 19
+#define LORA_SCK 18
+#define LORA_FREQUENCY 433E6
+
+// ---------------- BUZZER ----------------
+#define BUZZER_PIN 4
+
+// ---------------- THRESHOLDS ----------------
+#define RAIN_THRESHOLD 500
+#define WATER_THRESHOLD 500
+#define HIGH_WATER_DISTANCE 20.0
+
+// ---------------- SENSOR VARIABLES ----------------
+int rainValue = 0;
+int waterValue = 0;
+float temperature = 0;
+float humidity = 0;
+float distance = -1;
+int floatStatus = 0;
+
+unsigned long lastPacketTime = 0;
+bool packetReceived = false;
+
+// =================================================
+// PACKET PARSING FUNCTION
+// =================================================
+bool parsePacket(String packet)
+{
+  if (!packet.startsWith("FLOOD1,"))
+    return false;
+
+  packet.remove(0, 7);
+
+  String values[6];
+
+  for (int i = 0; i < 6; i++)
+  {
+    int comma = packet.indexOf(',');
+
+    if (i < 5 && comma < 0)
+      return false;
+
+    if (comma >= 0)
+    {
+      values[i] = packet.substring(0, comma);
+      packet.remove(0, comma + 1);
+    }
+    else
+    {
+      values[i] = packet;
+    }
+  }
+
+  rainValue = values[0].toInt();
+  waterValue = values[1].toInt();
+  temperature = values[2].toFloat();
+  humidity = values[3].toFloat();
+  distance = values[4].toFloat();
+  floatStatus = values[5].toInt();
+
+  return true;
+}
+
+// =================================================
+// FLOOD WARNING DETECTION
+// =================================================
+bool checkFloodWarning()
+{
+  bool rainDetected = (rainValue <= RAIN_THRESHOLD);
+  bool waterHigh = (waterValue >= WATER_THRESHOLD);
+  bool ultrasonicHigh = (distance > 0 && distance <= HIGH_WATER_DISTANCE);
+  bool floatTriggered = (floatStatus == 1);
+
+  return (rainDetected && (waterHigh || ultrasonicHigh)) || floatTriggered;
+}
+
+// =================================================
+// OLED DISPLAY FUNCTION
+// =================================================
+void updateDisplay(bool warning)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+
+  display.println("FLOOD MONITOR");
+  display.print("Rain: "); display.println(rainValue);
+  display.print("Water: "); display.println(waterValue);
+  display.print("Temp: "); display.println(temperature);
+  display.print("Humidity: "); display.println(humidity);
+  display.print("Distance: "); display.println(distance);
+  display.print("STATUS: ");
+
+  if (warning)
+    display.println("FLOOD ALERT!");
+  else
+    display.println("NORMAL");
+
+  display.display();
+}
+
+// =================================================
+// SETUP
+// =================================================
+void setup()
+{
+  Serial.begin(115200);
+
+  // Configure buzzer
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Initialize OLED
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS))
+  {
+    Serial.println("OLED initialization failed");
+  }
+
+  // Initialize LoRa SPI
+  SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
+
+  // Configure LoRa pins
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+
+  if (!LoRa.begin(LORA_FREQUENCY))
+  {
+    Serial.println("LoRa initialization failed");
+    while (1);
+  }
+
+  Serial.println("FLOOD RECEIVER INITIALIZED");
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.println("FLOOD RECEIVER");
+  display.println("Waiting for data...");
+  display.display();
+}
+
+// =================================================
+// MAIN LOOP
+// =================================================
+void loop()
+{
+  // Check incoming LoRa packets
+  int packetSize = LoRa.parsePacket();
+
+  if (packetSize)
+  {
+    String incoming = "";
+
+    while (LoRa.available())
+    {
+      incoming += (char)LoRa.read();
+    }
+
+    Serial.println("RECEIVED DATA:");
+    Serial.println(incoming);
+
+    // Parse received packet
+    if (parsePacket(incoming))
+    {
+      packetReceived = true;
+      lastPacketTime = millis();
+
+      // Check flood condition
+      bool warning = checkFloodWarning();
+
+      // Activate buzzer
+      digitalWrite(BUZZER_PIN, warning ? HIGH : LOW);
+
+      // Display sensor readings
+      updateDisplay(warning);
+
+      Serial.print("FLOOD WARNING: ");
+      Serial.println(warning ? "YES" : "NO");
+    }
+    else
+    {
+      Serial.println("INVALID PACKET");
+    }
+  }
+
+  // Detect communication failure
+  if (packetReceived && millis() - lastPacketTime > 10000UL)
+  {
+    digitalWrite(BUZZER_PIN, LOW);
+    packetReceived = false;
+
+    Serial.println("LORA COMMUNICATION LOST");
+
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("COMMUNICATION LOST");
+    display.display();
+  }
+}
